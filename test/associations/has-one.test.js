@@ -331,6 +331,7 @@ describe(Support.getTestDialectTeaser("HasOne"), function() {
     })
 
     it("can restrict deletes", function(done) {
+      var self = this
       var Task = this.sequelize.define('Task', { title: Sequelize.STRING })
         , User = this.sequelize.define('User', { username: Sequelize.STRING })
 
@@ -341,7 +342,7 @@ describe(Support.getTestDialectTeaser("HasOne"), function() {
           User.create({ username: 'foo' }).success(function(user) {
             Task.create({ title: 'task' }).success(function(task) {
               user.setTask(task).success(function() {
-                user.destroy().error(function() {
+                user.destroy().catch(self.sequelize.ForeignKeyConstraintError, function() {
                   // Should fail due to FK restriction
                   Task.findAll().success(function(tasks) {
                     expect(tasks).to.have.length(1)
@@ -388,6 +389,7 @@ describe(Support.getTestDialectTeaser("HasOne"), function() {
     })
 
     it("can restrict updates", function(done) {
+      var self = this
       var Task = this.sequelize.define('Task', { title: Sequelize.STRING })
         , User = this.sequelize.define('User', { username: Sequelize.STRING })
 
@@ -405,7 +407,7 @@ describe(Support.getTestDialectTeaser("HasOne"), function() {
 
                 var tableName = user.QueryInterface.QueryGenerator.addSchema(user.Model)
                 user.QueryInterface.update(user, tableName, {id: 999}, user.id)
-                .error(function() {
+                .catch(self.sequelize.ForeignKeyConstraintError, function() {
                   // Should fail due to FK restriction
                   Task.findAll().success(function(tasks) {
                     expect(tasks).to.have.length(1)
@@ -471,27 +473,83 @@ describe(Support.getTestDialectTeaser("HasOne"), function() {
       })
     })
 
-    it('allows the user to provide an attribute definition as foreignKey', function () {
-      var User = this.sequelize.define('user', {
+    describe('allows the user to provide an attribute definition object as foreignKey', function () {
+      it('works with a column that hasnt been defined before', function () {
+        var User = this.sequelize.define('user', {})
+      , Profile = this.sequelize.define('project', {})
+
+        User.hasOne(Profile, {
+          foreignKey: {
+            allowNull: false,
+            name: 'uid'
+          }
+        });
+
+        expect(Profile.rawAttributes.uid).to.be.defined
+        expect(Profile.rawAttributes.uid.references).to.equal(User.getTableName())
+        expect(Profile.rawAttributes.uid.referencesKey).to.equal('id')
+        expect(Profile.rawAttributes.uid.allowNull).to.be.false;
+
+        // Let's clear it
+        Profile = this.sequelize.define('project', {})
+        User.hasOne(Profile, {
+          foreignKey: {
+            allowNull: false,
+            name: 'uid',
+          }
+        });
+
+        expect(Profile.rawAttributes.uid).to.be.defined
+        expect(Profile.rawAttributes.uid.references).to.equal(User.getTableName())
+        expect(Profile.rawAttributes.uid.referencesKey).to.equal('id')
+        expect(Profile.rawAttributes.uid.allowNull).to.be.false;
+      });
+
+      it('works when taking a column directly from the object', function () {
+        var User = this.sequelize.define('user', {
+          uid: {
+            type: Sequelize.INTEGER,
+            primaryKey: true
+          }
+        })
+      , Profile = this.sequelize.define('project', {
+          user_id: {
+            type: Sequelize.INTEGER,
+            allowNull: false
+          }
+        })
+
+        User.hasOne(Profile, { foreignKey: Profile.rawAttributes.user_id})
+
+        expect(Profile.rawAttributes.user_id).to.be.defined
+        expect(Profile.rawAttributes.user_id.references).to.equal(User.getTableName())
+        expect(Profile.rawAttributes.user_id.referencesKey).to.equal('uid')
+        expect(Profile.rawAttributes.user_id.allowNull).to.be.false;
+      });
+
+      it('works when merging with an existing definition', function () {
+        var User = this.sequelize.define('user', {
             uid: {
               type: Sequelize.INTEGER,
               primaryKey: true
             }
           })
-        , Profile = this.sequelize.define('project', {
-            user_id: {
+        , Project = this.sequelize.define('project', {
+            userUid: {
               type: Sequelize.INTEGER,
-              allowNull: false
+              defaultValue: 42
             }
-          })
+          });
 
-      User.hasOne(Profile, { foreignKey: Profile.rawAttributes.user_id})
+        User.hasOne(Project, { foreignKey: { allowNull: false }});
 
-      expect(Profile.rawAttributes.user_id).to.be.defined
-      expect(Profile.rawAttributes.user_id.references).to.equal(User.getTableName())
-      expect(Profile.rawAttributes.user_id.referencesKey).to.equal('uid')
-      expect(Profile.rawAttributes.user_id.allowNull).to.be.false
-    })
+        expect(Project.rawAttributes.userUid).to.be.defined;
+        expect(Project.rawAttributes.userUid.allowNull).to.be.false;
+        expect(Project.rawAttributes.userUid.references).to.equal(User.getTableName())
+        expect(Project.rawAttributes.userUid.referencesKey).to.equal('uid')
+        expect(Project.rawAttributes.userUid.defaultValue).to.equal(42);
+      });
+    });
 
     it('should throw an error if an association clashes with the name of an already define attribute', function () {
        var User = this.sequelize.define('user', {

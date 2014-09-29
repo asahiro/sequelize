@@ -28,8 +28,15 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
         aBool:        DataTypes.BOOLEAN,
         uniqueName:   { type: DataTypes.STRING, unique: true }
       })
+      this.Account = this.sequelize.define('Account', {
+        accountName: DataTypes.STRING
+      });
+      this.Student = this.sequelize.define('Student', {
+          no:     {type:DataTypes.INTEGER,primaryKey:true},
+          name: {type:DataTypes.STRING,allowNull:false},
+      })
 
-      return this.User.sync({ force: true });
+      return this.sequelize.sync({ force: true });
     });
   });
 
@@ -45,6 +52,19 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
                 expect(count).to.equal(1)
                 done()
               })
+            })
+          })
+        })
+      })
+    })
+
+    it("supports more than one models per transaction", function(done) {
+      var self = this;
+      this.sequelize.transaction().then(function(t) {
+        self.User.findOrCreate({ where: { username: 'Username'}, defaults: { data: 'some data' }}, { transaction: t }).then(function() {
+          self.Account.findOrCreate({ where: { accountName: 'accountName'}}, { transaction: t}).then(function(){
+            t.commit().success(function() {
+              done()
             })
           })
         })
@@ -117,6 +137,30 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
       })
     })
 
+    it("should release transaction when meeting errors", function(){
+        var self = this
+
+        var test = function(times) {
+            if (times > 10) {
+                return true;
+            }
+            return self.Student.findOrCreate({
+              where: {
+                no: 1
+              }
+            })
+            .timeout(1000)
+            .catch(Promise.TimeoutError,function(e){
+                throw new Error(e)
+            })
+            .catch(Sequelize.ValidationError,function(err){
+                return test(times+1);
+            })
+        }
+
+        return test(0);
+    })
+
     describe('several concurrent calls', function () {
       it('works with a transaction', function () {
         return this.sequelize.transaction().bind(this).then(function (transaction) {
@@ -124,13 +168,17 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
             this.User.findOrCreate({ where: { uniqueName: 'winner' }}, { transaction: transaction }),
             this.User.findOrCreate({ where: { uniqueName: 'winner' }}, { transaction: transaction }),
             function (first, second) {
+               var firstInstance = first[0]
+              , firstCreated = first[1]
+              , secondInstance = second[0]
+              , secondCreated = second[1];
 
-              expect(first[0]).to.be.ok;
-              expect(first[1]).to.be.ok;
-              expect(second[0]).to.be.ok;
-              expect(second[1]).not.to.be.ok;
+              expect(firstInstance).to.be.ok;
+              expect(firstCreated).to.be.ok;
+              expect(secondInstance).to.be.ok;
+              expect(secondCreated).not.to.be.ok;
 
-              expect(first[0].id).to.equal(second[0].id);
+              expect(firstInstance.id).to.equal(secondInstance.id);
 
               return transaction.commit();
             }
@@ -144,12 +192,18 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
           this.User.findOrCreate({ where: { uniqueName: 'winner' }}),
           this.User.findOrCreate({ where: { uniqueName: 'winner' }}),
           function (first, second) {
-            expect(first[0]).to.be.ok;
-            expect(first[1]).to.be.ok;
-            expect(second[0]).to.be.ok;
-            expect(second[1]).not.to.be.ok;
+            var firstInstance = first[0]
+              , firstCreated = first[1]
+              , secondInstance = second[0]
+              , secondCreated = second[1];
 
-            expect(first[0].id).to.equal(second[0].id);
+            // Depending on execution order and MAGIC either the first OR the second call should return true
+            expect(firstCreated ? !secondCreated : secondCreated).to.be.ok // XOR
+
+            expect(firstInstance).to.be.ok;
+            expect(secondInstance).to.be.ok;
+
+            expect(firstInstance.id).to.equal(secondInstance.id);
           }
         );
       });
@@ -207,6 +261,30 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
         })
       })
     })
+
+    it('works without any primary key', function () {
+      var Log = this.sequelize.define('log', {
+        level: DataTypes.STRING
+      });
+
+      Log.removeAttribute('id');
+
+      return this.sequelize.sync({force: true}).then(function () {
+        return Promise.join(
+          Log.create({level: 'info'}),
+          Log.bulkCreate([
+            {level: 'error'},
+            {level: 'debug'}
+          ])
+        );
+      }).then(function () {
+        return Log.findAll();
+      }).then(function (logs) {
+        logs.forEach(function (log) {
+          expect(log.get('id')).not.to.be.ok;
+        });
+      });
+    });
 
     it('supports transactions', function(done) {
       var self = this;
@@ -312,6 +390,18 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
         })
       })
     })
+
+    it('should work with a non-id named uuid primary key columns', function () {
+      var Monkey = this.sequelize.define('Monkey', {
+        monkeyId: { type: DataTypes.UUID, primaryKey: true, defaultValue: DataTypes.UUIDV4, allowNull: false }
+      });
+
+      return this.sequelize.sync({force: true}).then(function () {
+        return Monkey.create();
+      }).then(function (monkey) {
+        expect(monkey.get('monkeyId')).to.be.ok;
+      });
+    });
 
     it('is possible to use functions as default values', function (done) {
       var self = this
@@ -1131,6 +1221,28 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
         })
       })
     })
+
+    it('should support schemas', function () {
+      var Dummy = this.sequelize.define("Dummy", {
+        foo : DataTypes.STRING,
+        bar : DataTypes.STRING
+      }, {
+        schema    : "space1",
+        tableName : 'Dummy'
+      });
+
+
+      return this.sequelize.dropAllSchemas().bind(this).then(function () {
+        return this.sequelize.createSchema('space1');
+      }).then(function () {
+        return Dummy.sync({force: true});
+      }).then(function () {
+        return Dummy.bulkCreate([
+          {foo : "a", bar : "b"},
+          {foo : "c", bar : "d"}
+        ]);
+      });
+    });
 
     if (Support.getTestDialect() !== 'postgres') {
       it("should support the ignoreDuplicates option", function(done) {
