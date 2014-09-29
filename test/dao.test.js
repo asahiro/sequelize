@@ -278,7 +278,7 @@ describe(Support.getTestDialectTeaser("DAO"), function () {
 
         User.sync({ force: true }).success(function() {
           User.create({ number: 1 }).success(function(user) {
-            sequelize.transaction(function(t) {
+            sequelize.transaction().then(function(t) {
               user.increment('number', { by: 2, transaction: t }).success(function() {
                 User.all().success(function(users1) {
                   User.all({ transaction: t }).success(function(users2) {
@@ -422,7 +422,7 @@ describe(Support.getTestDialectTeaser("DAO"), function () {
 
         User.sync({ force: true }).success(function() {
           User.create({ number: 3 }).success(function(user) {
-            sequelize.transaction(function(t) {
+            sequelize.transaction().then(function(t) {
               user.decrement('number', { by: 2, transaction: t }).success(function() {
                 User.all().success(function(users1) {
                   User.all({ transaction: t }).success(function(users2) {
@@ -550,7 +550,7 @@ describe(Support.getTestDialectTeaser("DAO"), function () {
 
         User.sync({ force: true }).success(function() {
           User.create({ username: 'foo' }).success(function(user) {
-            sequelize.transaction(function(t) {
+            sequelize.transaction().then(function(t) {
               User.update({ username: 'bar' }, {}, { transaction: t }).success(function() {
                 user.reload().success(function(user) {
                   expect(user.username).to.equal('foo')
@@ -629,17 +629,17 @@ describe(Support.getTestDialectTeaser("DAO"), function () {
             Page.create({ content: 'om nom nom' }).success(function(page) {
               book.setPages([ page ]).success(function() {
                 Book.find({
-                  where: (dialect === 'postgres' ? '"Book"."id"=' : '`Book`.`id`=') + book.id,
+                  where: { id : book.id },
                   include: [Page]
                 }).success(function(leBook) {
                   page.updateAttributes({ content: 'something totally different' }).success(function(page) {
-                    expect(leBook.pages.length).to.equal(1)
-                    expect(leBook.pages[0].content).to.equal('om nom nom')
+                    expect(leBook.Pages.length).to.equal(1)
+                    expect(leBook.Pages[0].content).to.equal('om nom nom')
                     expect(page.content).to.equal('something totally different')
 
                     leBook.reload().success(function(leBook) {
-                      expect(leBook.pages.length).to.equal(1)
-                      expect(leBook.pages[0].content).to.equal('something totally different')
+                      expect(leBook.Pages.length).to.equal(1)
+                      expect(leBook.Pages[0].content).to.equal('something totally different')
                       expect(page.content).to.equal('something totally different')
                       done()
                     })
@@ -753,7 +753,7 @@ describe(Support.getTestDialectTeaser("DAO"), function () {
         var User = sequelize.define('User', { username: Support.Sequelize.STRING })
 
         User.sync({ force: true }).success(function() {
-          sequelize.transaction(function(t) {
+          sequelize.transaction().then(function(t) {
             User.build({ username: 'foo' }).save({ transaction: t }).success(function() {
               User.count().success(function(count1) {
                 User.count({ transaction: t }).success(function(count2) {
@@ -853,7 +853,7 @@ describe(Support.getTestDialectTeaser("DAO"), function () {
       var self = this
       return this.User.create({ username: 'user' }).then(function (user) {
         var updatedAt = user.updatedAt
-        
+
         return new self.sequelize.Promise(function (resolve) {
           setTimeout(function () {
             user.updateAttributes({
@@ -865,7 +865,7 @@ describe(Support.getTestDialectTeaser("DAO"), function () {
 
               resolve()
             })
-          }, 2000)  
+          }, 2000)
         })
       })
     })
@@ -941,9 +941,9 @@ describe(Support.getTestDialectTeaser("DAO"), function () {
       this.User.create({aNumber: 0, validateTest: 'hello'}).error(function(err){
         expect(err).to.exist
         expect(err).to.be.instanceof(Object)
-        expect(err.validateTest).to.be.instanceof(Array)
-        expect(err.validateTest[0]).to.exist
-        expect(err.validateTest[0].message).to.equal('Validation isInt failed')
+        expect(err.get('validateTest')).to.be.instanceof(Array)
+        expect(err.get('validateTest')[0]).to.exist
+        expect(err.get('validateTest')[0].message).to.equal('Validation isInt failed')
         done()
       })
     })
@@ -953,10 +953,10 @@ describe(Support.getTestDialectTeaser("DAO"), function () {
       .error(function(err){
         expect(err).to.exist
         expect(err).to.be.instanceof(Object)
-        expect(err.validateCustom).to.exist
-        expect(err.validateCustom).to.be.instanceof(Array)
-        expect(err.validateCustom[0]).to.exist
-        expect(err.validateCustom[0].message).to.equal('Length failed.')
+        expect(err.get('validateCustom')).to.exist
+        expect(err.get('validateCustom')).to.be.instanceof(Array)
+        expect(err.get('validateCustom')[0]).to.exist
+        expect(err.get('validateCustom')[0].message).to.equal('Length failed.')
         done()
       })
     })
@@ -966,10 +966,10 @@ describe(Support.getTestDialectTeaser("DAO"), function () {
         user.updateAttributes({validateTest: 'hello'}).error(function(err){
           expect(err).to.exist
           expect(err).to.be.instanceof(Object)
-          expect(err.validateTest).to.exist
-          expect(err.validateTest).to.be.instanceof(Array)
-          expect(err.validateTest[0]).to.exist
-          expect(err.validateTest[0].message).to.equal('Validation isInt failed')
+          expect(err.get('validateTest')).to.exist
+          expect(err.get('validateTest')).to.be.instanceof(Array)
+          expect(err.get('validateTest')[0]).to.exist
+          expect(err.get('validateTest')[0].message).to.equal('Validation isInt failed')
           done()
         })
       })
@@ -1030,8 +1030,8 @@ describe(Support.getTestDialectTeaser("DAO"), function () {
                 self.UserEager.find({where: {age: 1}, include: [{model: self.ProjectEager, as: 'Projects'}]}).success(function(user) {
                   expect(user.username).to.equal('joe')
                   expect(user.age).to.equal(1)
-                  expect(user.projects).to.exist
-                  expect(user.projects.length).to.equal(2)
+                  expect(user.Projects).to.exist
+                  expect(user.Projects.length).to.equal(2)
 
                   user.age = user.age + 1 // happy birthday joe
 
@@ -1040,8 +1040,8 @@ describe(Support.getTestDialectTeaser("DAO"), function () {
 
                     expect(user.username).to.equal('joe')
                     expect(user.age).to.equal(2)
-                    expect(user.projects).to.exist
-                    expect(user.projects.length).to.equal(2)
+                    expect(user.Projects).to.exist
+                    expect(user.Projects.length).to.equal(2)
                     done()
                   })
                 })
@@ -1069,10 +1069,10 @@ describe(Support.getTestDialectTeaser("DAO"), function () {
                           _bart = simpsons[0]
                           _lisa = simpsons[1]
 
-                          expect(_bart.projects).to.exist
-                          expect(_lisa.projects).to.exist
-                          expect(_bart.projects.length).to.equal(2)
-                          expect(_lisa.projects.length).to.equal(2)
+                          expect(_bart.Projects).to.exist
+                          expect(_lisa.Projects).to.exist
+                          expect(_bart.Projects.length).to.equal(2)
+                          expect(_lisa.Projects.length).to.equal(2)
 
                           _bart.age = _bart.age + 1 // happy birthday bart - off to Moe's
 
@@ -1108,10 +1108,10 @@ describe(Support.getTestDialectTeaser("DAO"), function () {
               user.setProjects([homework, party]).success(function() {
                 self.ProjectEager.findAll({include: [{model: self.UserEager, as: 'Poobah'}]}).success(function(projects) {
                   expect(projects.length).to.equal(2)
-                  expect(projects[0].poobah).to.exist
-                  expect(projects[1].poobah).to.exist
-                  expect(projects[0].poobah.username).to.equal('poobah')
-                  expect(projects[1].poobah.username).to.equal('poobah')
+                  expect(projects[0].Poobah).to.exist
+                  expect(projects[1].Poobah).to.exist
+                  expect(projects[0].Poobah.username).to.equal('poobah')
+                  expect(projects[1].Poobah.username).to.equal('poobah')
 
                   projects[0].title        = 'partymore'
                   projects[1].title        = 'partymore'
@@ -1123,10 +1123,10 @@ describe(Support.getTestDialectTeaser("DAO"), function () {
                       self.ProjectEager.findAll({where: {title: 'partymore', overdue_days: 0}, include: [{model: self.UserEager, as: 'Poobah'}]}).success(function(savedprojects) {
 
                         expect(savedprojects.length).to.equal(2)
-                        expect(savedprojects[0].poobah).to.exist
-                        expect(savedprojects[1].poobah).to.exist
-                        expect(savedprojects[0].poobah.username).to.equal('poobah')
-                        expect(savedprojects[1].poobah.username).to.equal('poobah')
+                        expect(savedprojects[0].Poobah).to.exist
+                        expect(savedprojects[1].Poobah).to.exist
+                        expect(savedprojects[0].Poobah.username).to.equal('poobah')
+                        expect(savedprojects[1].Poobah.username).to.equal('poobah')
 
                         done()
                       })
@@ -1226,14 +1226,14 @@ describe(Support.getTestDialectTeaser("DAO"), function () {
             self.User.findAll({include: [ { model: self.Project, as: 'Projects' } ]}).success(function(users) {
               var _user = users[0]
 
-              expect(_user.projects).to.exist
-              expect(JSON.parse(JSON.stringify(_user)).projects).to.exist
+              expect(_user.Projects).to.exist
+              expect(JSON.parse(JSON.stringify(_user)).Projects).to.exist
 
               self.Project.findAll({include: [ { model: self.User, as: 'LovelyUser' } ]}).success(function(projects) {
                 var _project = projects[0]
 
-                expect(_project.lovelyUser).to.exist
-                expect(JSON.parse(JSON.stringify(_project)).lovelyUser).to.exist
+                expect(_project.LovelyUser).to.exist
+                expect(JSON.parse(JSON.stringify(_project)).LovelyUser).to.exist
 
                 done()
               })
@@ -1473,7 +1473,7 @@ describe(Support.getTestDialectTeaser("DAO"), function () {
 
         User.sync({ force: true }).success(function() {
           User.create({ username: 'foo' }).success(function(user) {
-            sequelize.transaction(function(t) {
+            sequelize.transaction().then(function(t) {
               user.updateAttributes({ username: 'bar' }, { transaction: t }).success(function() {
                 User.all().success(function(users1) {
                   User.all({ transaction: t }).success(function(users2) {
@@ -1607,7 +1607,7 @@ describe(Support.getTestDialectTeaser("DAO"), function () {
 
         User.sync({ force: true }).success(function() {
           User.create({ username: 'foo' }).success(function(user) {
-            sequelize.transaction(function(t) {
+            sequelize.transaction().then(function(t) {
               user.destroy({ transaction: t }).success(function() {
                 User.count().success(function(count1) {
                   User.count({ transaction: t }).success(function(count2) {

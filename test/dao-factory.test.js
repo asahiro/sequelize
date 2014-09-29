@@ -257,8 +257,8 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
       var titleSetter = sinon.spy()
         , Task = this.sequelize.define('TaskBuild', {
           title:  {
-            type: Sequelize.STRING(50), 
-            allowNull: false, 
+            type: Sequelize.STRING(50),
+            allowNull: false,
             defaultValue: ''
           }
         }, {
@@ -305,29 +305,113 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
       })
 
       User.sync({ force: true }).on('sql', _.after(2, function(sql) {
-        expect(sql).to.match(/UNIQUE\s*(uniq_UserWithUniqueUsernames_username_email)?\s*\([`"]?username[`"]?, [`"]?email[`"]?\)/)
-        expect(sql).to.match(/UNIQUE\s*(uniq_UserWithUniqueUsernames_aCol_bCol)?\s*\([`"]?aCol[`"]?, [`"]?bCol[`"]?\)/)
+        expect(sql).to.match(/UNIQUE\s*(user_and_email)?\s*\([`"]?username[`"]?, [`"]?email[`"]?\)/)
+        expect(sql).to.match(/UNIQUE\s*(a_and_b)?\s*\([`"]?aCol[`"]?, [`"]?bCol[`"]?\)/)
         done()
       }))
     })
 
     it('allows us to customize the error message for unique constraint', function(done) {
-      var User = this.sequelize.define('UserWithUniqueUsername', {
-        username: { type: Sequelize.STRING, unique: { name: 'user_and_email', msg: 'User and email must be unique' }},
-        email: { type: Sequelize.STRING, unique: 'user_and_email' },
-        aCol: { type: Sequelize.STRING, unique: 'a_and_b' },
-        bCol: { type: Sequelize.STRING, unique: 'a_and_b' }
-      })
+      var self = this
+        , User = this.sequelize.define('UserWithUniqueUsername', {
+            username: { type: Sequelize.STRING, unique: { name: 'user_and_email', msg: 'User and email must be unique' }},
+            email: { type: Sequelize.STRING, unique: 'user_and_email' },
+            aCol: { type: Sequelize.STRING, unique: 'a_and_b' },
+            bCol: { type: Sequelize.STRING, unique: 'a_and_b' }
+          })
 
       User.sync({ force: true }).success(function() {
         User.create({username: 'tobi', email: 'tobi@tobi.me'}).success(function() {
-          User.create({username: 'tobi', email: 'tobi@tobi.me'}).error(function(err) {
+          User.create({username: 'tobi', email: 'tobi@tobi.me'}).catch(self.sequelize.UniqueConstraintError, function(err) {
             expect(err.message).to.equal('User and email must be unique')
             done()
           })
         })
       })
     })
+
+    it('should allow the user to specify indexes in options', function () {
+      var Model = this.sequelize.define('model', {
+        fieldA: Sequelize.STRING,
+        fieldB: Sequelize.INTEGER,
+        fieldC: Sequelize.STRING
+      }, {
+        indexes: [
+          {
+            name: 'a_b_uniq',
+            unique: true,
+            method: 'BTREE',
+            fields: ['fieldB', {attribute:'fieldA', collate: dialect === 'sqlite' ? 'RTRIM' : 'en_US', order: 'DESC', length: 5}]
+          },
+          {
+            type: 'FULLTEXT',
+            fields: ['fieldC'],
+            concurrently: true
+          },
+        ],
+        engine: 'MyISAM'
+      })
+
+      return this.sequelize.sync().bind(this).then(function () {
+        return this.sequelize.queryInterface.showIndex(Model.tableName);
+      }).spread(function () {
+        var primary, idx1, idx2;
+
+        if (dialect === 'sqlite') {
+          // PRAGMA index_info does not return the primary index
+          idx1 = arguments[0];
+          idx2 = arguments[1];
+
+          expect(idx1.fields).to.deep.equal([
+            { attribute: 'fieldB', length: undefined, order: undefined},
+            { attribute: 'fieldA', length: undefined, order: undefined},
+          ]);
+
+          expect(idx2.fields).to.deep.equal([
+            { attribute: 'fieldC', length: undefined, order: undefined}
+          ]);
+        } else if (dialect === 'postgres') {
+          // Postgres returns indexes in alphabetical order
+          primary = arguments[2];
+          idx1 = arguments[0];
+          idx2 = arguments[1];
+
+          expect(idx1.fields).to.deep.equal([
+            { attribute: 'fieldB', length: undefined, order: undefined, collate: undefined},
+            { attribute: 'fieldA', length: undefined, order: 'DESC', collate: 'en_US'},
+          ]);
+
+          expect(idx2.fields).to.deep.equal([
+            { attribute: 'fieldC', length: undefined, order: undefined, collate: undefined}
+          ]);
+        } else {
+          // And finally mysql returns the primary first, and then the rest in the order they were defined
+          primary = arguments[0];
+          idx1 = arguments[1];
+          idx2 = arguments[2];
+
+          expect(primary.primary).to.be.ok;
+
+          expect(idx1.type).to.equal('BTREE');
+          expect(idx2.type).to.equal('FULLTEXT');
+
+          expect(idx1.fields).to.deep.equal([
+            { attribute: 'fieldB', length: undefined, order: 'ASC'},
+            { attribute: 'fieldA', length: 5, order: 'ASC'},
+          ]);
+
+          expect(idx2.fields).to.deep.equal([
+            { attribute: 'fieldC', length: undefined, order: undefined}
+          ]);
+        }
+
+        expect(idx1.name).to.equal('a_b_uniq');
+        expect(idx1.unique).to.be.ok;
+
+        expect(idx2.name).to.equal('models_field_c');
+        expect(idx2.unique).not.to.be.ok;
+      });
+    });
   })
 
   describe('build', function() {
@@ -465,11 +549,11 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
         var product = Product.build({
           id: 1,
           title: 'Chair',
-          tags: [
+          Tags: [
             {id: 1, name: 'Alpha'},
             {id: 2, name: 'Beta'}
           ],
-          user: {
+          User: {
             id: 1,
             first_name: 'Mick',
             last_name: 'Hansen'
@@ -481,11 +565,11 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
           ]
         })
 
-        expect(product.tags).to.be.ok
-        expect(product.tags.length).to.equal(2)
-        expect(product.tags[0].Model).to.equal(Tag)
-        expect(product.user).to.be.ok
-        expect(product.user.Model).to.equal(User)
+        expect(product.Tags).to.be.ok
+        expect(product.Tags.length).to.equal(2)
+        expect(product.Tags[0].Model).to.equal(Tag)
+        expect(product.User).to.be.ok
+        expect(product.User.Model).to.equal(User)
       })
 
       it('should support includes with aliases', function () {
@@ -500,9 +584,9 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
           last_name: Sequelize.STRING
         })
 
-        Product.hasMany(Tag, {as: 'Categories'})
-        Product.hasMany(User, {as: 'Followers', through: 'product_followers'})
-        User.hasMany(Product, {as: 'Following', through: 'product_followers'})
+        Product.hasMany(Tag, {as: 'categories'})
+        Product.hasMany(User, {as: 'followers', through: 'product_followers'})
+        User.hasMany(Product, {as: 'following', through: 'product_followers'})
 
         var product = Product.build({
           id: 1,
@@ -527,8 +611,8 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
           ]
         }, {
           include: [
-            {model: User, as: 'Followers'},
-            {model: Tag, as: 'Categories'}
+            {model: User, as: 'followers'},
+            {model: Tag, as: 'categories'}
           ]
         })
 
@@ -548,7 +632,7 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
         var User = sequelize.define('User', { username: Sequelize.STRING, foo: Sequelize.STRING })
 
         User.sync({ force: true }).success(function() {
-          sequelize.transaction(function(t) {
+          sequelize.transaction().then(function(t) {
             User.create({ username: 'foo' }, { transaction: t }).success(function() {
               User.find({ where: { username: 'foo' }, transaction: t }).success(function(user) {
                 expect(user).to.not.be.null
@@ -559,6 +643,25 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
         })
       })
     })
+
+    it('should not fail if model is paranoid and where is an empty array', function(done) {
+      var User = this.sequelize.define('User', { username: Sequelize.STRING }, { paranoid: true })
+
+      User.sync({ force: true })
+        .then(function () {
+          return User.create({ username: 'A fancy name' })
+        })
+        .then(function(u) {
+          return User.find({ where: [] })
+        })
+        .then(function (u) {
+          expect(u.username).to.equal('A fancy name')
+          done();
+        })
+        .catch(function (err) {
+          done(err)
+        })
+    })
   })
 
   describe('findOrInitialize', function() {
@@ -567,7 +670,7 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
         var User = sequelize.define('User', { username: Sequelize.STRING, foo: Sequelize.STRING })
 
         User.sync({ force: true }).success(function() {
-          sequelize.transaction(function(t) {
+          sequelize.transaction().then(function(t) {
             User.create({ username: 'foo' }, { transaction: t }).success(function() {
               User.findOrInitialize({ username: 'foo' }).spread(function(user1) {
                 User.findOrInitialize({ username: 'foo' }, { transaction: t }).spread(function(user2) {
@@ -646,7 +749,7 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
 
         User.sync({ force: true }).done(function() {
           User.create({ username: 'foo' }).done(function() {
-            sequelize.transaction(function(t) {
+            sequelize.transaction().then(function(t) {
               User.update({ username: 'bar' }, {}, { transaction: t }).done(function(err) {
                 User.all().done(function(err, users1) {
                   User.all({ transaction: t }).done(function(err, users2) {
@@ -758,30 +861,38 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
       })
     })
 
-    it('sets updatedAt to the current timestamp', function(done) {
-      var self = this
-        , data = [{ username: 'Peter', secretValue: '42' },
+    it('sets updatedAt to the current timestamp', function() {
+      var data = [{ username: 'Peter', secretValue: '42' },
                   { username: 'Paul',  secretValue: '42' },
-                  { username: 'Bob',   secretValue: '43' }]
+                  { username: 'Bob',   secretValue: '43' }];
 
-      this.User.bulkCreate(data).success(function() {
-        self.User.update({username: 'Bill'}, {secretValue: '42'}).done(function(err) {
-          expect(err).not.to.be.ok
-          self.User.findAll({order: 'id'}).success(function(users) {
-            expect(users.length).to.equal(3)
+      this.clock = sinon.useFakeTimers();
 
-            expect(users[0].username).to.equal("Bill")
-            expect(users[1].username).to.equal("Bill")
-            expect(users[2].username).to.equal("Bob")
+      return this.User.bulkCreate(data).bind(this).then(function() {
+        return this.User.findAll({order: 'id'});
+      }).then(function (users) {
+        this.updatedAt = users[0].updatedAt;
 
-            expect(parseInt(+users[0].updatedAt/5000, 10)).to.be.closeTo(parseInt(+new Date()/5000, 10), 1)
-            expect(parseInt(+users[1].updatedAt/5000, 10)).to.be.closeTo(parseInt(+new Date()/5000, 10), 1)
+        expect(this.updatedAt).to.be.ok;
+        expect(this.updatedAt).to.equalTime(users[2].updatedAt); // All users should have the same updatedAt
 
-            done()
-          })
-        })
-      })
-    })
+        // Pass the time so we can actually see a change
+        this.clock.tick(1000);
+
+        return this.User.update({username: 'Bill'}, {secretValue: '42'});
+      }).then(function () {
+        return this.User.findAll({order: 'id'});
+      }).then(function (users) {
+        expect(users[0].username).to.equal("Bill");
+        expect(users[1].username).to.equal("Bill");
+        expect(users[2].username).to.equal("Bob");
+
+        expect(users[0].updatedAt).to.be.afterTime(this.updatedAt);
+        expect(users[2].updatedAt).to.equalTime(this.updatedAt);
+
+        this.clock.restore();
+      });
+    });
 
     it('returns the number of affected rows', function(_done) {
      var self = this
@@ -793,17 +904,43 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
       this.User.bulkCreate(data).success(function() {
         self.User.update({username: 'Bill'}, {secretValue: '42'}).spread(function(affectedRows) {
           expect(affectedRows).to.equal(2)
-          
+
           done()
         })
 
         self.User.update({username: 'Bill'}, {secretValue: '44'}).spread(function(affectedRows) {
           expect(affectedRows).to.equal(0)
-          
+
           done()
         })
       })
     })
+
+    if (dialect === "postgres") {
+      it('returns the affected rows if `options.returning` is true', function(_done) {
+       var self = this
+          , data = [{ username: 'Peter', secretValue: '42' },
+                    { username: 'Paul',  secretValue: '42' },
+                    { username: 'Bob',   secretValue: '43' }]
+          , done = _.after(2, _done)
+
+        this.User.bulkCreate(data).success(function() {
+          self.User.update({ username: 'Bill' }, { secretValue: '42' }, { returning: true }).spread(function(count, rows) {
+            expect(count).to.equal(2)
+            expect(rows).to.have.length(2)
+
+            done()
+          })
+
+          self.User.update({ username: 'Bill'}, { secretValue: '44' }, { returning: true }).spread(function(count, rows) {
+            expect(count).to.equal(0)
+            expect(rows).to.have.length(0)
+
+            done()
+          })
+        })
+      })
+    }
 
     if(Support.dialectIsMySQL()) {
       it('supports limit clause', function (done) {
@@ -830,7 +967,7 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
 
         User.sync({ force: true }).success(function() {
           User.create({ username: 'foo' }).success(function() {
-            sequelize.transaction(function(t) {
+            sequelize.transaction().then(function(t) {
               User.destroy({}, { transaction: t }).success(function() {
                 User.count().success(function(count1) {
                   User.count({ transaction: t }).success(function(count2) {
@@ -891,8 +1028,8 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
                 expect(users[0].username).to.equal("Peter")
                 expect(users[1].username).to.equal("Paul")
 
-                expect(moment(users[0].deletedAt).utc().format('YYYY-MM-DD h:mm')).to.equal(date)
-                expect(moment(users[1].deletedAt).utc().format('YYYY-MM-DD h:mm')).to.equal(date)
+                expect(moment(new Date(users[0].deletedAt)).utc().format('YYYY-MM-DD h:mm')).to.equal(date)
+                expect(moment(new Date(users[1].deletedAt)).utc().format('YYYY-MM-DD h:mm')).to.equal(date)
                 done()
               })
             })
@@ -930,6 +1067,80 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
           })
         })
       })
+    })
+
+    describe('can find paranoid records if paranoid is marked as false in query', function() {
+      it('with the DAOFactory', function() {
+        var User = this.sequelize.define('UserCol', {
+          username: Sequelize.STRING
+        }, { paranoid: true })
+
+        return User.sync({ force: true })
+          .then(function() {
+            return User.bulkCreate([
+              {username: 'Toni'},
+              {username: 'Tobi'},
+              {username: 'Max'}
+            ]);
+          })
+          .then(function() { return User.find(1) })
+          .then(function(user) { return user.destroy() })
+          .then(function() { return User.find({ where: 1, paranoid: false }) })
+          .then(function(user) {
+            expect(user).to.exist
+            return User.find(1)
+          })
+          .then(function(user) {
+            expect(user).to.be.null
+            return [User.count(), User.count({ paranoid: false })]
+          })
+          .spread(function(cnt, cntWithDeleted) {
+            expect(cnt).to.equal(2)
+            expect(cntWithDeleted).to.equal(3)
+          })
+      })
+    })
+
+    it('should include deleted associated records if include has paranoid marked as false', function() {
+        var User = this.sequelize.define('User', {
+          username: Sequelize.STRING
+        }, { paranoid: true })
+        var Pet = this.sequelize.define('Pet', {
+          name: Sequelize.STRING,
+          UserId: Sequelize.INTEGER
+        }, { paranoid: true })
+
+        User.hasMany(Pet)
+        Pet.belongsTo(User)
+
+        var user;
+        return User.sync({ force: true })
+          .then(function() { return Pet.sync({ force: true }) })
+          .then(function() { return User.create({ username: 'Joe' }) })
+          .then(function(_user) {
+            user = _user;
+            return Pet.bulkCreate([
+              { name: 'Fido', UserId: user.id },
+              { name: 'Fifi', UserId: user.id }
+            ]);
+          })
+          .then(function () { return Pet.find(1) })
+          .then(function (pet) { return pet.destroy() })
+          .then(function () {
+            return [
+              User.find({ where: user.id, include: Pet }),
+              User.find({
+                where: user.id,
+                include: [{ model: Pet, paranoid: false }]
+              })
+            ]
+          })
+          .spread(function (user, userWithDeletedPets) {
+            expect(user).to.exist
+            expect(user.Pets).to.have.length(1)
+            expect(userWithDeletedPets).to.exist
+            expect(userWithDeletedPets.Pets).to.have.length(2)
+          })
     })
 
     it('should delete a paranoid record if I set force to true', function(done) {
@@ -987,14 +1198,14 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
         self.User.destroy({secretValue: '42'}).done(function(err, affectedRows) {
           expect(err).not.to.be.ok
           expect(affectedRows).to.equal(2)
-          
+
           done()
         })
 
         self.User.destroy({secretValue: '44'}).done(function(err, affectedRows) {
           expect(err).not.to.be.ok
           expect(affectedRows).to.equal(0)
-          
+
           done()
         })
       })
@@ -1095,7 +1306,7 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
         var User = sequelize.define('User', { username: Sequelize.STRING })
 
         User.sync({ force: true }).success(function() {
-          sequelize.transaction(function(t) {
+          sequelize.transaction().then(function(t) {
             User.create({ username: 'foo' }, { transaction: t }).success(function() {
               User.count().success(function(count1) {
                 User.count({ transaction: t }).success(function(count2) {
@@ -1148,6 +1359,28 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
         })
       })
     })
+
+    it('supports distinct option', function(done) {
+      var Post = this.sequelize.define('Post',{})
+      var PostComment = this.sequelize.define('PostComment',{})
+      Post.hasMany(PostComment)
+      Post.sync({ force: true }).success(function() {
+        PostComment.sync({ force: true }).success(function() {
+          Post.create({}).success(function(post){
+            PostComment.bulkCreate([{ PostId: post.id },{ PostId: post.id }]).success(function(){
+              Post.count({ include: [{ model: PostComment, required: false }] }).success(function(count1){
+                Post.count({ distinct: true, include: [{ model: PostComment, required: false }] }).success(function(count2){
+                  expect(count1).to.equal(2)
+                  expect(count2).to.equal(1)
+                  done()
+                })
+              })
+            })
+          })
+        })
+      })
+    })
+
   })
 
   describe('min', function() {
@@ -1173,7 +1406,7 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
         var User = sequelize.define('User', { age: Sequelize.INTEGER })
 
         User.sync({ force: true }).success(function() {
-          sequelize.transaction(function(t) {
+          sequelize.transaction().then(function(t) {
             User.bulkCreate([{ age: 2 }, { age: 5 }, { age: 3 }], { transaction: t }).success(function() {
               User.min('age').success(function(min1) {
                 User.min('age', { transaction: t }).success(function(min2) {
@@ -1262,7 +1495,7 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
         var User = sequelize.define('User', { age: Sequelize.INTEGER })
 
         User.sync({ force: true }).success(function() {
-          sequelize.transaction(function(t) {
+          sequelize.transaction().then(function(t) {
             User.bulkCreate([{ age: 2 }, { age: 5 }, { age: 3 }], { transaction: t }).success(function() {
               User.max('age').success(function(min1) {
                 User.max('age', { transaction: t }).success(function(min2) {
@@ -1803,7 +2036,7 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
           var User = sequelize.define('User', { username: Sequelize.STRING })
 
           User.sync({ force: true }).success(function() {
-            sequelize.transaction(function(t) {
+            sequelize.transaction().then(function(t) {
               User.create({ username: 'foo' }, { transaction: t }).success(function() {
                 User.where({ username: "foo" }).exec().success(function(users1) {
                   User.where({ username: "foo" }).exec({ transaction: t }).success(function(users2) {
@@ -1978,6 +2211,20 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
       })
     })
 
+    it('should not fail when array contains Sequelize.or / and', function (done) {
+      this.User.findAll({
+        where: [
+          this.sequelize.or({ username: 'vader' }, { username: 'luke' }),
+          this.sequelize.and({ id: [1, 2, 3] })
+        ]
+      })
+        .then(function(res) {
+          expect(res).to.have.length(2)
+          done()
+        })
+        .catch(function(e) { done(e) })
+    })
+
     it('should not fail with an include', function(done) {
       this.User.findAll({
         where: [
@@ -2023,8 +2270,25 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
       }).error(done)
     })
 
+    it('should not overwrite a specified deletedAt (complex query)', function (done) {
+      this.User.findAll({
+        where: [
+          this.sequelize.or({ username: 'leia' }, { username: 'luke' }),
+          this.sequelize.and(
+            { id: [1, 2, 3] },
+            this.sequelize.or({ deletedAt: null }, { deletedAt: { gt: new Date(0) } })
+          )
+        ]
+      })
+        .then(function(res) {
+          expect(res).to.have.length(2)
+          done()
+        })
+        .catch(function(e) { done(e) })
+    })
+
   })
-  
+
   if (dialect !== 'sqlite') {
     it('supports multiple async transactions', function(done) {
       this.timeout(25000);
@@ -2037,7 +2301,7 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
             }, {
               transaction: t
             }).then(function () {
-              return User.findAll({ 
+              return User.findAll({
                 where: {
                   username: "foo"
                 }
@@ -2045,7 +2309,7 @@ describe(Support.getTestDialectTeaser("DAOFactory"), function () {
                 expect(users).to.have.length(0);
               });
             }).then(function () {
-              return User.findAll({ 
+              return User.findAll({
                 where: {
                   username: "foo"
                 },

@@ -100,9 +100,24 @@ describe(Support.getTestDialectTeaser("Migrator"), function() {
         SequelizeMeta.create({ from: null, to: 20111117063700 }).success(function() {
           migrator.getUndoneMigrations(function(err, migrations) {
             expect(err).to.be.null
-            expect(migrations).to.have.length(14)
+            expect(migrations).to.have.length(15)
             expect(migrations[0].filename).to.equal('20111130161100-emptyMigration.js')
             done()
+          })
+        })
+      })
+    })
+
+    it("returns pending migrations", function(done) {
+      this.init(undefined, function(migrator, SequelizeMeta) {
+        SequelizeMeta.create({ from: 20111117063700, to: 20111117063700 }).success(function() {
+          SequelizeMeta.create({ from: 20111117063700, to: 20130909185621 }).success(function() {
+            migrator.getUndoneMigrations(function(err, migrations) {
+              expect(err).to.be.null
+              expect(migrations).to.have.length(14)
+              expect(migrations[0].filename).to.equal('20111130161100-emptyMigration.js')
+              done()
+            })
           })
         })
       })
@@ -120,24 +135,6 @@ describe(Support.getTestDialectTeaser("Migrator"), function() {
     })
 
     describe('executions', function() {
-      it("supports coffee files", function(done) {
-        var self = this
-
-        this.init({
-          filesFilter: /\.coffee$/,
-          to: 20111130161100
-        }, function(migrator) {
-          self.migrator = migrator
-          self.migrator.migrate().success(function() {
-            self.sequelize.getQueryInterface().showAllTables().success(function(tableNames) {
-              tableNames = tableNames.filter(function(e){ return e != 'SequelizeMeta' })
-              expect(tableNames).to.eql([ 'Person' ])
-              done()
-            })
-          })
-        })
-      })
-
       it("executes migration #20111117063700 and correctly creates the table", function(done) {
         this.sequelize.getQueryInterface().showAllTables().success(function(tableNames) {
           tableNames = tableNames.filter(function(e){ return e != 'SequelizeMeta' })
@@ -171,6 +168,23 @@ describe(Support.getTestDialectTeaser("Migrator"), function() {
         })
       })
 
+      it("supports coffee files", function(done) {
+        var self = this
+
+        this.init({
+          filesFilter: /\.coffee$/,
+          to: 20111130161100
+        }, function(migrator) {
+          self.migrator = migrator
+          self.migrator.migrate().success(function() {
+            self.sequelize.getQueryInterface().showAllTables().success(function(tableNames) {
+              tableNames = tableNames.filter(function(e){ return e != 'SequelizeMeta' })
+              expect(tableNames).to.eql([ 'Person' ])
+              done()
+            })
+          })
+        })
+      })
       it("executes the empty migration #20111130161100", function(done) {
         this.init({ from: 20111130161100, to: 20111130161100 }, function(migrator) {
           // this migration isn't actually testing anything but
@@ -183,6 +197,38 @@ describe(Support.getTestDialectTeaser("Migrator"), function() {
             .success(done)
             .error(function(err) { console.log(err) })
         })
+      })
+
+      it("executes pending migrations", function(done) {
+        var self = this;
+        var options = {
+          path:    __dirname + '/assets/migrations',
+          to: 20111117063700
+        };
+
+        var migrator = new Migrator(this.sequelize, options)
+
+        migrator
+          .migrate()
+          .success(function() {
+
+            self.init({ to: 20111205064000 }, function(migrator, SequelizeMeta) {
+              SequelizeMeta.create({ from: 20111205064000, to: 20111205064000 }).success(function() {
+                migrator
+                  .migrate()
+                  .success(function() {
+                    SequelizeMeta.findAll().success(function(meta) {
+                      expect(meta.length).to.equal(3);
+                      done();
+                    });
+                  })
+                  .error(function(err) { console.log(err) })
+              })
+            })
+
+          })
+          .error(function(err) { console.log(err) })
+
       })
     })
 
@@ -311,6 +357,28 @@ describe(Support.getTestDialectTeaser("Migrator"), function() {
               }
               expect(signature.allowNull).to.equal(false)
               expect(signature.defaultValue).to.equal('Signature')
+
+              done()
+            })
+          })
+        })
+      })
+
+      it('changes the level column from user and casts the data to the target enum type', function(done) {
+        var self = this
+
+        this.init({ to: 20111205163000 }, function(migrator) {
+          migrator.migrate().success(function() {
+            self.sequelize.getQueryInterface().describeTable('User').complete(function(err, data) {
+              var level = data.level;
+
+              if (dialect === 'postgres') {
+                expect(level.type).to.equal('USER-DEFINED');
+              } else if (dialect === 'sqlite') {
+                expect(level.type).to.equal('TEXT');
+              } else {
+                expect(level.type).to.equal('ENUM(\'BASIC\',\'ADVANCED\')');
+              }
 
               done()
             })

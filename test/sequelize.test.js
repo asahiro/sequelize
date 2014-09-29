@@ -26,6 +26,20 @@ var qq = function(str) {
 
 describe(Support.getTestDialectTeaser("Sequelize"), function () {
   describe('constructor', function() {
+    if (dialect !== 'sqlite') {
+      it('should work with minConnections', function () {
+        var ConnectionManager = require(__dirname + '/../lib/dialects/' + dialect + '/connection-manager.js')
+          , connectionSpy = ConnectionManager.prototype.connect = chai.spy(ConnectionManager.prototype.connect);
+
+        var sequelize = Support.createSequelizeInstance({
+          pool: {
+            minConnections: 2
+          }
+        });
+        expect(connectionSpy).to.have.been.called.twice;
+      });
+    }
+
     it('should pass the global options correctly', function(done) {
       var sequelize = Support.createSequelizeInstance({ logging: false, define: { underscored:true } })
         , DAO = sequelize.define('dao', {name: DataTypes.STRING})
@@ -108,7 +122,7 @@ describe(Support.getTestDialectTeaser("Sequelize"), function () {
               }
 
               done()
-              
+
             })
         })
       })
@@ -253,12 +267,27 @@ describe(Support.getTestDialectTeaser("Sequelize"), function () {
       })
     })
 
-    it('executes select query and parses dot notation results', function(done) {
+    it('executes select query with dot notation results', function(done) {
       var self = this
       self.sequelize.query('DELETE FROM ' + qq(self.User.tableName)).complete(function() {
         self.sequelize.query(self.insertQuery).success(function() {
           self.sequelize
             .query("select username as " + qq("user.username") + " from " + qq(self.User.tableName) + "")
+            .complete(function(err, users) {
+              expect(err).to.be.null
+              expect(users).to.deep.equal([{'user.username':'john'}])
+              done()
+            })
+        })
+      })
+    })
+
+    it('executes select query with dot notation results and nest it', function(done) {
+      var self = this
+      self.sequelize.query('DELETE FROM ' + qq(self.User.tableName)).complete(function() {
+        self.sequelize.query(self.insertQuery).success(function() {
+          self.sequelize
+            .query("select username as " + qq("user.username") + " from " + qq(self.User.tableName) + "", null, { raw: true, nest: true })
             .complete(function(err, users) {
               expect(err).to.be.null
               expect(users.map(function(u){ return u.user })).to.deep.equal([{'username':'john'}])
@@ -298,11 +327,21 @@ describe(Support.getTestDialectTeaser("Sequelize"), function () {
       })
     })
 
-    it('destructs dot separated attributes when doing a raw query', function(done) {
+    it('dot separated attributes when doing a raw query without nest', function(done) {
       var tickChar = (dialect === 'postgres') ? '"' : '`'
         , sql      = "select 1 as " + Sequelize.Utils.addTicks('foo.bar.baz', tickChar)
 
-      this.sequelize.query(sql, null, { raw: true }).success(function(result) {
+      this.sequelize.query(sql, null, { raw: true, nest: false }).success(function(result) {
+        expect(result).to.deep.equal([ { 'foo.bar.baz': 1 } ])
+        done()
+      })
+    })
+
+    it('destructs dot separated attributes when doing a raw query using nest', function(done) {
+      var tickChar = (dialect === 'postgres') ? '"' : '`'
+        , sql      = "select 1 as " + Sequelize.Utils.addTicks('foo.bar.baz', tickChar)
+
+      this.sequelize.query(sql, null, { raw: true, nest: true }).success(function(result) {
         expect(result).to.deep.equal([ { foo: { bar: { baz: 1 } } } ])
         done()
       })
@@ -744,7 +783,7 @@ describe(Support.getTestDialectTeaser("Sequelize"), function () {
         it("doesn't save an instance if value is not in the range of enums", function(done) {
           this.Review.create({status: 'fnord'}).error(function(err) {
             expect(err).to.be.instanceOf(Error);
-            expect(err.status[0].message).to.equal('Value "fnord" for ENUM status is out of allowed scope. Allowed values: scheduled, active, finished')
+            expect(err.get('status')[0].message).to.equal('Value "fnord" for ENUM status is out of allowed scope. Allowed values: scheduled, active, finished')
             done()
           })
         })
@@ -789,16 +828,32 @@ describe(Support.getTestDialectTeaser("Sequelize"), function () {
       })
 
       it('passes a transaction object to the callback', function(done) {
-        this.sequelizeWithTransaction.transaction(function(t) {
+        this.sequelizeWithTransaction.transaction().then(function(t) {
           expect(t).to.be.instanceOf(Transaction)
           done()
         })
       })
 
+      it('throws an error if a function was passed as the first argument', function() {
+        var self = this
+
+        expect(function() {
+          self.sequelizeWithTransaction.transaction(function() {})
+        }).to.throw('DEPRECATION WARNING: This function no longer accepts callbacks. Use sequelize.transaction().then(function (t) {}) instead.')
+      });
+
+      it('throws an error if a function was passed as the second argument', function() {
+        var self = this
+
+        expect(function() {
+          self.sequelizeWithTransaction.transaction(null, function() {})
+        }).to.throw('DEPRECATION WARNING: This function no longer accepts callbacks. Use sequelize.transaction().then(function (t) {}) instead.')
+      });
+
       it('allows me to define a callback on the result', function(done) {
         this
           .sequelizeWithTransaction
-          .transaction(function(t) { t.commit() })
+          .transaction().then(function(t) { t.commit() })
           .done(done)
       })
 
@@ -817,7 +872,7 @@ describe(Support.getTestDialectTeaser("Sequelize"), function () {
           }
 
           TransactionTest.sync({ force: true }).success(function() {
-            self.sequelizeWithTransaction.transaction(function(t1) {
+            self.sequelizeWithTransaction.transaction().then(function(t1) {
               self.sequelizeWithTransaction.query('INSERT INTO ' + qq('TransactionTests') + ' (' + qq('name') + ') VALUES (\'foo\');', null, { plain: true, raw: true, transaction: t1 }).success(function() {
                 count(null, function(cnt) {
                   expect(cnt).to.equal(0)
@@ -852,9 +907,9 @@ describe(Support.getTestDialectTeaser("Sequelize"), function () {
           }
 
           TransactionTest.sync({ force: true }).success(function() {
-            self.sequelizeWithTransaction.transaction(function(t1) {
+            self.sequelizeWithTransaction.transaction().then(function(t1) {
               self.sequelizeWithTransaction.query('INSERT INTO ' + qq('TransactionTests') + ' (' + qq('name') + ') VALUES (\'foo\');', null, { plain: true, raw: true, transaction: t1 }).success(function() {
-                self.sequelizeWithTransaction.transaction(function(t2) {
+                self.sequelizeWithTransaction.transaction().then(function(t2) {
                   self.sequelizeWithTransaction.query('INSERT INTO ' + qq('TransactionTests') + ' (' + qq('name') + ') VALUES (\'bar\');', null, { plain: true, raw: true, transaction: t2 }).success(function() {
                     count(null, function(cnt) {
                       expect(cnt).to.equal(0)
@@ -888,6 +943,140 @@ describe(Support.getTestDialectTeaser("Sequelize"), function () {
         })
       }
 
+      it('supports nested transactions using savepoints', function(done) {
+        var self = this
+        var User = this.sequelizeWithTransaction.define('Users', { username: DataTypes.STRING })
+
+        User.sync({ force: true }).success(function() {
+          self.sequelizeWithTransaction.transaction().then(function(t1) {
+            User.create({ username: 'foo' }, { transaction: t1 }).success(function(user) {
+              self.sequelizeWithTransaction.transaction({ transaction: t1 }).then(function(t2) {
+                user.updateAttributes({ username: 'bar' }, { transaction: t2 }).success(function() {
+                  t2.commit().then(function() {
+                    user.reload({ transaction: t1 }).success(function(newUser) {
+                      expect(newUser.username).to.equal('bar')
+
+                      t1.commit().then(function() {
+                        done()
+                      });
+                    })
+                  })
+                })
+              })
+            })
+          })
+        })
+      })
+
+      describe('supports rolling back to savepoints', function () {
+        beforeEach(function () {
+          this.User = this.sequelizeWithTransaction.define('user', {});
+          return this.sequelizeWithTransaction.sync({ force: true });
+        })
+
+        it('rolls back to the first savepoint, undoing everything', function () {
+          return this.sequelizeWithTransaction.transaction().bind(this).then(function(transaction) {
+            this.transaction = transaction;
+
+            return this.sequelizeWithTransaction.transaction({ transaction: transaction });
+          }).then(function (sp1) {
+            this.sp1 = sp1;
+            return this.User.create({}, { transaction: this.transaction });
+          }).then(function () {
+            return this.sequelizeWithTransaction.transaction({ transaction: this.transaction });
+          }).then(function (sp2) {
+            this.sp2 = sp2;
+            return this.User.create({}, { transaction: this.transaction });
+          }).then(function () {
+            return this.User.findAll({}, { transaction: this.transaction });
+          }).then(function (users) {
+            expect(users).to.have.length(2);
+
+            return this.sp1.rollback();
+          }).then(function () {
+            return this.User.findAll({}, { transaction: this.transaction });
+          }).then(function (users) {
+            expect(users).to.have.length(0);
+
+            return this.transaction.rollback();
+          });
+        });
+
+        it('rolls back to the most recent savepoint, only undoing recent changes', function () {
+          return this.sequelizeWithTransaction.transaction().bind(this).then(function(transaction) {
+            this.transaction = transaction;
+
+            return this.sequelizeWithTransaction.transaction({ transaction: transaction });
+          }).then(function (sp1) {
+            this.sp1 = sp1;
+            return this.User.create({}, { transaction: this.transaction });
+          }).then(function () {
+            return this.sequelizeWithTransaction.transaction({ transaction: this.transaction });
+          }).then(function (sp2) {
+            this.sp2 = sp2;
+            return this.User.create({}, { transaction: this.transaction });
+          }).then(function () {
+            return this.User.findAll({}, { transaction: this.transaction });
+          }).then(function (users) {
+            expect(users).to.have.length(2);
+
+            return this.sp2.rollback();
+          }).then(function () {
+            return this.User.findAll({}, { transaction: this.transaction });
+          }).then(function (users) {
+            expect(users).to.have.length(1);
+
+            return this.transaction.rollback();
+          });
+        });
+      });
+
+      it('supports rolling back a nested transaction', function(done) {
+        var self = this
+        var User = this.sequelizeWithTransaction.define('Users', { username: DataTypes.STRING })
+
+        User.sync({ force: true }).success(function() {
+          self.sequelizeWithTransaction.transaction().then(function(t1) {
+            User.create({ username: 'foo' }, { transaction: t1 }).success(function(user) {
+              self.sequelizeWithTransaction.transaction({ transaction: t1 }).then(function(t2) {
+                user.updateAttributes({ username: 'bar' }, { transaction: t2 }).success(function() {
+                  t2.rollback().then(function() {
+                    user.reload({ transaction: t2 }).success(function(newUser) {
+                      expect(newUser.username).to.equal('foo')
+
+                      t1.commit().then(function() {
+                        done()
+                      });
+                    })
+                  })
+                })
+              })
+            })
+          })
+        })
+      })
+
+      it('supports rolling back outermost transaction', function(done) {
+        var self = this
+        var User = this.sequelizeWithTransaction.define('Users', { username: DataTypes.STRING })
+
+        User.sync({ force: true }).success(function() {
+          self.sequelizeWithTransaction.transaction().then(function(t1) {
+            User.create({ username: 'foo' }, { transaction: t1 }).success(function(user) {
+              self.sequelizeWithTransaction.transaction({ transaction: t1 }).then(function(t2) {
+                user.updateAttributes({ username: 'bar' }, { transaction: t2 }).success(function() {
+                  t1.rollback().then(function() {
+                    User.findAll().success(function(users) {
+                      expect(users.length).to.equal(0);
+                      done()
+                    })
+                  })
+                })
+              })
+            })
+          })
+        })
+      })
     })
   })
 })

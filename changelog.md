@@ -1,4 +1,43 @@
-Notice: All 1.7.x changes are present in 2.0.x aswell
+# v2.0.0-dev13
+We are working our way to the first 2.0.0 release candidate.
+
+- [FEATURE] Added to option of setting a timezone offset in the sequelize constructor (`timezone` option). This timezone is used when initializing a connection (using `SET TIME ZONE` or equivalent), and when converting a timestamp string from the DB to a JS date with mysql (postgres stores the timezone, so for postgres we rely on what's in the DB).
+- [FEATURE] Allow setting plural and singular name on the model (`options.name` in `sequelize.define`) and in associations (`options.as`) to circumvent issues with weird pluralization.
+- [FEATURE] Added support for passing an `indexes` array in options to `sequelize.define`. [#1485](https://github.com/sequelize/sequelize/issues/1485). See API reference for details.
+- [FEATURE/INTERNALS] Standardized the output from `QueryInterface.showIndex`.
+- [FEATURE] Include deleted rows in find [#2083](https://github.com/sequelize/sequelize/pull/2083)
+- [FEATURE] Make addSingular and addPlural for n:m assocations (fx `addUser` and `addUsers` now both accept an array or an instance.
+- [BUG] Hid `dottie.transform` on raw queries behind a flag (`nest`) [#2064](https://github.com/sequelize/sequelize/pull/2064)
+- [BUG] Fixed problems with transcation parameter being removed / not passed on in associations [#1789](https://github.com/sequelize/sequelize/issues/1789) and [#1968](https://github.com/sequelize/sequelize/issues/1968)
+- [BUG] Fix problem with minConnections. [#2048](https://github.com/sequelize/sequelize/issues/2048)
+- [BUG] Fix default scope being overwritten [#2087](https://github.com/sequelize/sequelize/issues/2087)
+- [BUG] Fixed updatedAt timestamp not being set in bulk create when validate = true. [#1962](https://github.com/sequelize/sequelize/issues/1962)
+- [INTERNALS] Replaced lingo with inflection
+- [INTERNALS] Removed underscore.string dependency and moved a couple of helper functions from `Utils._` to `Utils` 
+- [INTERNALS] Update dependencies
+    + validator 3.2.0 -> 3.16.1
+    + moment 2.5.0 -> 2.7.0
+    + generic-pool 2.0.4 -> 2.1.1
+    + sql 0.35.0 -> 0.39.0
+- [INTERNALS] Use a transaction inside `findOrCreate`, and handle unique constraint errors if multiple calls are issues concurrently on the same transaction
+
+#### Backwards compatability changes
+- We are using a new inflection library, which should make pluralization and singularization in general more robust. However, a couple of pluralizations have changed as a result:
+    + Person is now pluralized as people instead of persons
+- Accesors for models with underscored names are no longer camel cased automatically. For example, if you have a model with name `my_model`, and `my_other_model.hasMany(my_model)`, the getter will now be `instance_of_my_model.getMy_model` instead of `.getMyModel`. 
+- Removed support for setting sequelize.language. If your model names are not in english, use the name option provided by `sequelize.name` to defined singular and plural forms for your model.
+- Model names are now used more verbatim in associations. This means that if you have a model named `Task` (plural T), or an association specifying `{ as: 'Task' }`, the tasks will be returned as `relatedModel.Tasks` instead of `relatedModel.tasks`. For more information and how to mitigate this, see https://github.com/sequelize/sequelize/wiki/Upgrading-to-2.0#inflection-replaces-lingo-and-changes-to-naming-conventions
+- Removed the freezeAssociations option - use model and assocation names instead to provide the plural form yourself
+- Removed sequelize.language option (not supported by inflection)
+- Error handling has been refactored. Code that listens for :
+    + All Error classes properly inherit from Error and a common SequelizeBaseError base
+    + Instance Validator returns a single instance of a ValidationError which contains an errors array property. This property contains individual error items for each failed validation.
+    + ValidationError includes a `get(path)` method to find all broken validations for a path on an instance. To migrate existing error handling, switch from array indexing to using the get method:
+        
+        Old: `err.validateCustom[0]` 
+        New: `err.get('validateCustom')[0]` 
+- The syntax for findOrCreate has changed, to be more in line with the rest of the library. `Model.findOrCreate(where, defaults);` becomes `Model.findOrCreate({ where: where, defaults: defaults });`.
+       
 
 # v2.0.0-dev12
 - [FEATURE] You can now return a promise to a hook rather than use a callback
@@ -17,10 +56,11 @@ Notice: All 1.7.x changes are present in 2.0.x aswell
 - [BUG] find no longer applies limit: 1 if querying on a primary key, should fix a lot of subquery issues.
 - [BUG] Transactions now use the pool so you will never go over your pool defined connection limit
 - [BUG] Fix use of Sequelize.literal in eager loading and when renaming attributes [#1916](https://github.com/sequelize/sequelize/pull/1916)
+- [BUG] Use the provided name for a unique index if one is given, instead of concating the column names together [#1944](https://github.com/sequelize/sequelize/issues/1944)
+- [BUG] Create a composite primary key for doubled linked self reference [#1891](https://github.com/sequelize/sequelize/issues/1891)
 - [INTERNALS] `bulkDeleteQuery` was removed from the MySQL / abstract query generator, since it was never used internally. Please use `deleteQuery` instead.
 
-
-#### Breaking changes
+#### Backwards compatability changes
 - Sequelize now returns promises instead of its custom event emitter from most calls. This affects methods that return multiple values (like `findOrCreate` or `findOrInitialize`). If your current callbacks do not accept the 2nd success parameter you might be seeing an array as the first param. Either use `.spread()` for these methods or add another argument to your callback: `.success(instance)` -> `.success(instance, created)`.
 - `.success()`/`.done()` and any other non promise methods are now deprecated (we will keep the codebase around for a few versions though). on('sql') persists for debugging purposes.
 - Model association calls (belongsTo/hasOne/hasMany) are no longer chainable. (this is to support being able to pass association references to include rather than model/as combinations)
@@ -46,7 +86,6 @@ Notice: All 1.7.x changes are present in 2.0.x aswell
 - [FEATURE] Read cli options from a file. Thanks to @codeinvain  [#1540](https://github.com/sequelize/sequelize/pull/1540)
 
 #### Backwards compatability changes
-
 - The `notNull` validator has been removed, use the Schema's `allowNull` property.
 - All Validation errors now return a sequelize.ValidationError which inherits from Error.
 - selectedValues has been removed for performance reasons, if you depend on this, please open an issue and we will help you work around it.
@@ -58,7 +97,12 @@ Notice: All 1.7.x changes are present in 2.0.x aswell
 - Join tables will be no longer be paranoid (have a deletedAt timestamp added), even though other models are.
 - All tables in select queries will now be aliased with the model names to be support schemas. This will affect people stuff like `where: {'table.attribute': value}
 
-# v.17.9
+# v1.7.10
+- [FEATURE] ilike support for postgres [#2122](https://github.com/sequelize/sequelize/pull/2122)
+- [FEATURE] distinct option for count [#2079](https://github.com/sequelize/sequelize/pull/2079)
+- [BUG] various fixes
+
+# v1.7.9
 - [BUG] fixes issue with custom primary keys and N:M join tables [#1929](https://github.com/sequelize/sequelize/pull/1923)
 
 # v1.7.8

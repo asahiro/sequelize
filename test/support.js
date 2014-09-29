@@ -38,18 +38,37 @@ var Support = {
     var dialect = Support.getTestDialect();
 
     if (dialect === 'sqlite') {
-      var options    = Sequelize.Utils._.extend({}, sequelize.options, { storage: path.join(__dirname, 'tmp', 'db.sqlite') })
-        , _sequelize = new Sequelize(sequelize.config.database, null, null, options);
+      var p = path.join(__dirname, 'tmp', 'db.sqlite');
 
-      _sequelize.sync({ force: true }).success(function() { callback(_sequelize); });
+      return new Sequelize.Promise(function (resolve, reject) {
+        // We cannot promisify exists, since exists does not follow node callback convention - first argument is a boolean, not an error / null
+        if (fs.existsSync(p)) {
+          resolve(Sequelize.Promise.promisify(fs.unlink)(p));
+        } else {
+          resolve();
+        }
+      }).then(function () {
+        var options    = Sequelize.Utils._.extend({}, sequelize.options, { storage: p })
+          , _sequelize = new Sequelize(sequelize.config.database, null, null, options);
+
+        if (callback) {
+          _sequelize.sync({ force: true }).success(function() { callback(_sequelize); });
+        } else {
+          return _sequelize.sync({ force: true }).return(_sequelize);
+        }
+      });
     } else {
-      callback(sequelize);
+      if (callback) {
+        callback(sequelize);
+      } else {
+        return Sequelize.Promise.resolve(sequelize);
+      }
     }
   },
 
   createSequelizeInstance: function(options) {
     options = options || {};
-    options.dialect = options.dialect || 'mysql';
+    options.dialect = this.getTestDialect();
 
     var config = Config[options.dialect];
 
@@ -168,8 +187,8 @@ var Support = {
   }
 };
 
-var sequelize = Support.createSequelizeInstance({ dialect: Support.getTestDialect() });
-
+var sequelize = Support.createSequelizeInstance();
+//
 // For Postgres' HSTORE functionality and to properly execute it's commands we'll need this...
 before(function() {
   var dialect = Support.getTestDialect();
@@ -185,5 +204,6 @@ beforeEach(function() {
 
   return Support.clearDatabase(this.sequelize);
 });
+
 
 module.exports = Support;

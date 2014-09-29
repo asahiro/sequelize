@@ -394,23 +394,23 @@ describe(Support.getTestDialectTeaser("Include"), function () {
                 }).done(function (err, users) {
                   expect(err).not.to.be.ok
                   users.forEach(function (user) {
-                    user.memberships.sort(sortById)
+                    user.Memberships.sort(sortById)
 
-                    expect(user.memberships.length).to.equal(2)
-                    expect(user.memberships[0].group.name).to.equal('Developers')
-                    expect(user.memberships[0].rank.canRemove).to.equal(1)
-                    expect(user.memberships[1].group.name).to.equal('Designers')
-                    expect(user.memberships[1].rank.canRemove).to.equal(0)
+                    expect(user.Memberships.length).to.equal(2)
+                    expect(user.Memberships[0].Group.name).to.equal('Developers')
+                    expect(user.Memberships[0].Rank.canRemove).to.equal(1)
+                    expect(user.Memberships[1].Group.name).to.equal('Designers')
+                    expect(user.Memberships[1].Rank.canRemove).to.equal(0)
 
-                    user.products.sort(sortById)
-                    expect(user.products.length).to.equal(2)
-                    expect(user.products[0].tags.length).to.equal(2)
-                    expect(user.products[1].tags.length).to.equal(1)
-                    expect(user.products[0].category).to.be.ok
-                    expect(user.products[1].category).not.to.be.ok
+                    user.Products.sort(sortById)
+                    expect(user.Products.length).to.equal(2)
+                    expect(user.Products[0].Tags.length).to.equal(2)
+                    expect(user.Products[1].Tags.length).to.equal(1)
+                    expect(user.Products[0].Category).to.be.ok
+                    expect(user.Products[1].Category).not.to.be.ok
 
-                    expect(user.products[0].prices.length).to.equal(2)
-                    expect(user.products[1].prices.length).to.equal(4)
+                    expect(user.Products[0].Prices.length).to.equal(2)
+                    expect(user.Products[1].Prices.length).to.equal(4)
 
                     done()
                   })
@@ -423,14 +423,14 @@ describe(Support.getTestDialectTeaser("Include"), function () {
     })
 
     it('should support many levels of belongsTo', function (done) {
-      var A = this.sequelize.define('A', {})
-        , B = this.sequelize.define('B', {})
-        , C = this.sequelize.define('C', {})
-        , D = this.sequelize.define('D', {})
-        , E = this.sequelize.define('E', {})
-        , F = this.sequelize.define('F', {})
-        , G = this.sequelize.define('G', {})
-        , H = this.sequelize.define('H', {})
+      var A = this.sequelize.define('a', {})
+        , B = this.sequelize.define('b', {})
+        , C = this.sequelize.define('c', {})
+        , D = this.sequelize.define('d', {})
+        , E = this.sequelize.define('e', {})
+        , F = this.sequelize.define('f', {})
+        , G = this.sequelize.define('g', {})
+        , H = this.sequelize.define('h', {})
 
       A.belongsTo(B)
       B.belongsTo(C)
@@ -472,7 +472,7 @@ describe(Support.getTestDialectTeaser("Include"), function () {
             async.eachSeries(singles, function (model, callback) {
               model.create({}).done(function (err, instance) {
                 if (previousInstance) {
-                  previousInstance["set"+model.name](instance).done(function () {
+                  previousInstance["set"+Sequelize.Utils.uppercaseFirst(model.name)](instance).done(function () {
                     previousInstance = instance
                     callback()
                   })
@@ -502,6 +502,118 @@ describe(Support.getTestDialectTeaser("Include"), function () {
                     {model: E, include: [
                       {model: F, include: [
                         {model: G, include: [
+                          {model: H}
+                        ]}
+                      ]}
+                    ]}
+                  ]}
+                ]}
+              ]}
+            ]
+          }).done(function (err, as) {
+            expect(err).not.to.be.ok
+            expect(as.length).to.be.ok
+
+            as.forEach(function (a) {
+              expect(a.b.c.d.e.f.g.h).to.be.ok
+            })
+            done()
+          })
+        })
+      })
+    })
+
+    it('should support many levels of belongsTo (with a lower level having a where)', function (done) {
+      var A = this.sequelize.define('a', {})
+        , B = this.sequelize.define('b', {})
+        , C = this.sequelize.define('c', {})
+        , D = this.sequelize.define('d', {})
+        , E = this.sequelize.define('e', {})
+        , F = this.sequelize.define('f', {})
+        , G = this.sequelize.define('g', {
+          name: DataTypes.STRING
+        })
+        , H = this.sequelize.define('h', {
+          name: DataTypes.STRING
+        })
+
+      A.belongsTo(B)
+      B.belongsTo(C)
+      C.belongsTo(D)
+      D.belongsTo(E)
+      E.belongsTo(F)
+      F.belongsTo(G)
+      G.belongsTo(H)
+
+      var b, singles = [
+        B,
+        C,
+        D,
+        E,
+        F,
+        G,
+        H
+      ]
+
+      this.sequelize.sync().done(function () {
+        async.auto({
+          as: function (callback) {
+            A.bulkCreate([
+              {},
+              {},
+              {},
+              {},
+              {},
+              {},
+              {},
+              {}
+            ]).done(function () {
+              A.findAll().done(callback)
+            })
+          },
+          singleChain: function (callback) {
+            var previousInstance
+
+            async.eachSeries(singles, function (model, callback) {
+              var values = {};
+
+              if (model.name === 'g') {
+                values.name = 'yolo';
+              }
+              model.create(values).done(function (err, instance) {
+                if (previousInstance) {
+                  previousInstance["set"+Sequelize.Utils.uppercaseFirst(model.name)](instance).done(function () {
+                    previousInstance = instance
+                    callback()
+                  })
+                } else {
+                  previousInstance = b = instance
+                  callback()
+                }
+              })
+            }, callback)
+          },
+          abs: ['as', 'singleChain', function (callback, results) {
+            var chainer = new Sequelize.Utils.QueryChainer()
+
+            results.as.forEach(function (a) {
+              chainer.add(a.setB(b))
+            })
+
+            chainer.run().done(callback)
+          }]
+        }, function () {
+
+          A.findAll({
+            include: [
+              {model: B, include: [
+                {model: C, include: [
+                  {model: D, include: [
+                    {model: E, include: [
+                      {model: F, include: [
+                        {model: G, where: {
+                          name: 'yolo'
+                        }, include: [
                           {model: H}
                         ]}
                       ]}
@@ -590,7 +702,7 @@ describe(Support.getTestDialectTeaser("Include"), function () {
           }]
         }, function() {
           User.findAll({
-            'where': {'itemA.test': 'abc'}, 
+            'where': {'itemA.test': 'abc'},
             'include': [
               {'model': Item, 'as': 'itemA'},
               {'model': Item, 'as': 'itemB'},
@@ -603,8 +715,8 @@ describe(Support.getTestDialectTeaser("Include"), function () {
             expect(as[0].itemA.test).to.eql('abc')
             expect(as[1].itemA.test).to.eql('abc')
 
-            expect(as[0].order.position).to.eql(1)
-            expect(as[1].order.position).to.eql(2)
+            expect(as[0].Order.position).to.eql(1)
+            expect(as[1].Order.position).to.eql(2)
 
             done()
           })
@@ -674,14 +786,14 @@ describe(Support.getTestDialectTeaser("Include"), function () {
           }).done(function (err, products) {
             expect(err).not.to.be.ok
 
-            expect(products[0].tags[0].productTag.priority).to.equal(1)
-            expect(products[0].tags[1].productTag.priority).to.equal(2)
+            expect(products[0].Tags[0].ProductTag.priority).to.equal(1)
+            expect(products[0].Tags[1].ProductTag.priority).to.equal(2)
 
-            expect(products[1].tags[0].productTag.priority).to.equal(1)
+            expect(products[1].Tags[0].ProductTag.priority).to.equal(1)
 
-            expect(products[2].tags[0].productTag.priority).to.equal(3)
-            expect(products[2].tags[1].productTag.priority).to.equal(1)
-            expect(products[2].tags[2].productTag.priority).to.equal(2)
+            expect(products[2].Tags[0].ProductTag.priority).to.equal(3)
+            expect(products[2].Tags[1].ProductTag.priority).to.equal(1)
+            expect(products[2].Tags[2].ProductTag.priority).to.equal(2)
 
             done()
           })
@@ -720,7 +832,7 @@ describe(Support.getTestDialectTeaser("Include"), function () {
           }).done(function (err, users) {
             expect(err).not.to.be.ok
             expect(users.length).to.equal(1)
-            expect(users[0].group).to.be.ok
+            expect(users[0].Group).to.be.ok
             done()
           })
         })
@@ -766,8 +878,8 @@ describe(Support.getTestDialectTeaser("Include"), function () {
           }).done(function (err, users) {
             expect(err).not.to.be.ok
             expect(users.length).to.equal(1)
-            expect(users[0].group).to.be.ok
-            expect(users[0].group.name).to.equal('A')
+            expect(users[0].Group).to.be.ok
+            expect(users[0].Group.name).to.equal('A')
             done()
           })
         })
@@ -813,7 +925,7 @@ describe(Support.getTestDialectTeaser("Include"), function () {
           }).done(function (err, users) {
             expect(err).not.to.be.ok
             users.forEach(function (user) {
-              expect(user.group).to.be.ok
+              expect(user.Group).to.be.ok
             })
             done()
           })
@@ -832,7 +944,7 @@ describe(Support.getTestDialectTeaser("Include"), function () {
       // Associate
       User.belongsTo( Address, { foreignKey: 'addressId' })
       Address.hasMany( User, { foreignKey: 'addressId' })
-      
+
       Address.belongsTo( Street, { foreignKey: 'streetId' })
       Street.hasMany( Address, { foreignKey: 'streetId' })
 
@@ -854,8 +966,8 @@ describe(Support.getTestDialectTeaser("Include"), function () {
               ]
             }).done(function (err, john) {
               expect(err).not.to.be.ok
-              expect(john.address).to.be.ok
-              expect(john.address.street).to.be.ok
+              expect(john.Address).to.be.ok
+              expect(john.Address.Street).to.be.ok
               done();
             })
 
@@ -927,8 +1039,8 @@ describe(Support.getTestDialectTeaser("Include"), function () {
             expect(err).not.to.be.ok
             expect(users.length).to.equal(1)
             users.forEach(function (user) {
-              expect(user.group).to.be.ok
-              expect(user.group.categories).to.be.ok
+              expect(user.Group).to.be.ok
+              expect(user.Group.Categories).to.be.ok
             })
             done()
           })
@@ -997,8 +1109,8 @@ describe(Support.getTestDialectTeaser("Include"), function () {
             expect(err).not.to.be.ok
             expect(users.length).to.equal(1)
             users.forEach(function (user) {
-              expect(user.team).to.be.ok
-              expect(user.team.tags).to.be.ok
+              expect(user.Team).to.be.ok
+              expect(user.Team.Tags).to.be.ok
             })
             done()
           })
@@ -1067,8 +1179,8 @@ describe(Support.getTestDialectTeaser("Include"), function () {
             expect(err).not.to.be.ok
             expect(users.length).to.equal(1)
             users.forEach(function (user) {
-              expect(user.group).to.be.ok
-              expect(user.group.categories).to.be.ok
+              expect(user.Group).to.be.ok
+              expect(user.Group.Categories).to.be.ok
             })
             done()
           })
@@ -1115,8 +1227,8 @@ describe(Support.getTestDialectTeaser("Include"), function () {
           }).done(function (err, users) {
             expect(err).not.to.be.ok
             expect(users.length).to.equal(1)
-            expect(users[0].leaderOf).to.be.ok
-            expect(users[0].leaderOf.title).to.equal('Beta')
+            expect(users[0].LeaderOf).to.be.ok
+            expect(users[0].LeaderOf.title).to.equal('Beta')
             done()
           })
         })
@@ -1182,7 +1294,7 @@ describe(Support.getTestDialectTeaser("Include"), function () {
             expect(err).not.to.be.ok
 
             expect(products.length).to.equal(1)
-            expect(products[0].tags.length).to.equal(1)
+            expect(products[0].Tags.length).to.equal(1)
 
             done()
           })
@@ -1354,12 +1466,12 @@ describe(Support.getTestDialectTeaser("Include"), function () {
                   ]
                 }).done(function (err, users) {
                   expect(err).not.to.be.ok
-                  
+
                   users.forEach(function (user) {
-                    expect(user.memberships.length).to.equal(1)
-                    expect(user.memberships[0].rank.name).to.equal('Admin')
-                    expect(user.products.length).to.equal(1)
-                    expect(user.products[0].prices.length).to.equal(1)
+                    expect(user.Memberships.length).to.equal(1)
+                    expect(user.Memberships[0].Rank.name).to.equal('Admin')
+                    expect(user.Products.length).to.equal(1)
+                    expect(user.Products[0].Prices.length).to.equal(1)
                   })
 
                   done()
@@ -1415,7 +1527,7 @@ describe(Support.getTestDialectTeaser("Include"), function () {
             expect(users.length).to.equal(2)
 
             users.forEach(function (user) {
-              expect(user.group.name).to.equal('A')
+              expect(user.Group.name).to.equal('A')
             })
             done()
           })
@@ -1442,9 +1554,9 @@ describe(Support.getTestDialectTeaser("Include"), function () {
           expect(products.length).to.equal(3)
 
           products.forEach(function (product) {
-            expect(product.company.name).to.equal('NYSE')
-            expect(product.tags.length).to.be.ok
-            expect(product.prices.length).to.be.ok
+            expect(product.Company.name).to.equal('NYSE')
+            expect(product.Tags.length).to.be.ok
+            expect(product.Prices.length).to.be.ok
           })
           done()
         })
@@ -1494,8 +1606,8 @@ describe(Support.getTestDialectTeaser("Include"), function () {
           expect(err).not.to.be.ok
 
           products.forEach(function (product) {
-            expect(product.tags.length).to.be.ok
-            product.tags.forEach(function (tag) {
+            expect(product.Tags.length).to.be.ok
+            product.Tags.forEach(function (tag) {
               expect(tag.get().productTags).not.to.be.ok
             })
           })
@@ -1545,7 +1657,7 @@ describe(Support.getTestDialectTeaser("Include"), function () {
         var members = []
           , albums = []
           , memberCount = 20
- 
+
         for(var i = 1;i <= memberCount;i++) {
           members.push({
             id: i,
@@ -1557,7 +1669,7 @@ describe(Support.getTestDialectTeaser("Include"), function () {
             MemberId: i
           });
         }
- 
+
         Member.bulkCreate(members).done(function (err) {
           expect(err).not.to.be.ok;
           Album.bulkCreate(albums).done(function (err) {
@@ -1575,7 +1687,7 @@ describe(Support.getTestDialectTeaser("Include"), function () {
               expect(members.length).to.equal(20);
               members.forEach(function (member) {
                 expect(member.get('id')).not.to.be.ok;
-                expect(member.albums.length).to.equal(1);
+                expect(member.Albums.length).to.equal(1);
               });
 
               done();
@@ -1606,10 +1718,10 @@ describe(Support.getTestDialectTeaser("Include"), function () {
           expect(products.length).to.equal(6)
 
           products.forEach(function (product) {
-            expect(product.tags.length).to.be.ok
-            expect(product.prices.length).to.be.ok
+            expect(product.Tags.length).to.be.ok
+            expect(product.Prices.length).to.be.ok
 
-            product.prices.forEach(function (price) {
+            product.Prices.forEach(function (price) {
               expect(price.value).to.be.above(5)
             })
           })
@@ -1636,10 +1748,10 @@ describe(Support.getTestDialectTeaser("Include"), function () {
           expect(products.length).to.equal(10)
 
           products.forEach(function (product) {
-            expect(product.tags.length).to.be.ok
-            expect(product.prices.length).to.be.ok
+            expect(product.Tags.length).to.be.ok
+            expect(product.Prices.length).to.be.ok
 
-            product.tags.forEach(function (tag) {
+            product.Tags.forEach(function (tag) {
               expect(['A', 'B', 'C']).to.include(tag.name)
             })
           })
@@ -1666,12 +1778,12 @@ describe(Support.getTestDialectTeaser("Include"), function () {
               User.findAll({
                 where: {
                   id: user.id
-                }, 
+                },
                 include: [Group]
               }).success(function (users) {
                 expect(users[0].dateField.getTime()).to.equal(Date.UTC(2014, 1, 20))
                 expect(users[0].groups[0].dateField.getTime()).to.equal(Date.UTC(2014, 1, 20))
-                
+
                 done()
               })
             })
@@ -1679,5 +1791,37 @@ describe(Support.getTestDialectTeaser("Include"), function () {
         })
       })
     })
+
+    it("should still pull the main record(s) when an included model is not required and has where restrictions without matches", function () {
+      var self = this
+        , A = this.sequelize.define( 'a', {name: DataTypes.STRING(40)} )
+        , B = this.sequelize.define( 'b', {name: DataTypes.STRING(40)} );
+
+      A.hasMany(B);
+      B.hasMany(A);
+
+      return this.sequelize
+        .sync({force: true})
+        .then(function () {
+          return A.create({
+            name: 'Foobar'
+          });
+        })
+        .then(function () {
+          return A.findAll({
+            where: {name: 'Foobar'},
+            include: [
+              {model: B, where: {name: 'idontexist'}, required: false}
+            ]
+          });
+        })
+        .then(function (as) {
+          expect(as.length).to.equal(1);
+          expect(as[0].get('bs')).deep.equal([]);
+        });
+    });
+
+
+
   })
 })

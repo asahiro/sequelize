@@ -21,11 +21,14 @@
   "sub":true,
 
   /* questionable */
-  "shadow":true,
   "loopfunc":true,
-  "evil":true,
-  
+
+  "globals": {
+    "Promise": true
+  },
+
   "predef": [
+    "alert",
     "describe",
     "it",
     "before",

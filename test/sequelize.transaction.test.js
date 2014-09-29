@@ -11,14 +11,14 @@ describe(Support.getTestDialectTeaser("Sequelize#transaction"), function () {
     it("gets triggered once a transaction has been successfully committed", function(done) {
       this
         .sequelize
-        .transaction(function(t) { t.commit(); })
+        .transaction().then(function(t) { t.commit(); })
         .success(function() { done(); });
     });
 
     it("gets triggered once a transaction has been successfully rollbacked", function(done) {
       this
         .sequelize
-        .transaction(function(t) { t.rollback(); })
+        .transaction().then(function(t) { t.rollback(); })
         .success(function() { done(); });
     });
 
@@ -87,36 +87,19 @@ describe(Support.getTestDialectTeaser("Sequelize#transaction"), function () {
       // how could we enforce an authentication error in sqlite?
     } else {
       it("gets triggered once an error occurs", function(done) {
-        var sequelize = Support.createSequelizeInstance({ dialect: Support.getTestDialect() });
+        var sequelize = Support.createSequelizeInstance();
 
         // lets overwrite the host to get an error
         sequelize.config.username = 'foobarbaz';
 
         sequelize
-          .transaction(function() {})
+          .transaction().then(function() {})
           .catch(function(err) {
             expect(err).to.not.be.undefined;
             done();
           });
       });
     }
-  });
-
-  describe('callback', function() {
-    it("receives the transaction if only one argument is passed", function(done) {
-      this.sequelize.transaction(function(t) {
-        expect(t).to.be.instanceOf(Transaction);
-        t.commit();
-      }).done(done);
-    });
-
-    it("receives an error and the transaction if two arguments are passed", function(done) {
-      this.sequelize.transaction(function(err, t) {
-        expect(err).to.not.be.instanceOf(Transaction);
-        expect(t).to.be.instanceOf(Transaction);
-        t.commit();
-      }).done(done);
-    });
   });
 
   describe('complex long running example', function() {
@@ -130,7 +113,9 @@ describe(Support.getTestDialectTeaser("Sequelize#transaction"), function () {
         sequelize
           .sync({ force: true })
           .then(function() {
-            sequelize.transaction(function(transaction) {
+            sequelize.transaction().then(function(transaction) {
+              expect(transaction).to.be.instanceOf(Transaction);
+
               Test
                 .create({ name: 'Peter' }, { transaction: transaction })
                 .then(function() {
@@ -173,8 +158,8 @@ describe(Support.getTestDialectTeaser("Sequelize#transaction"), function () {
       it("triggers the error event for the second transactions", function(done) {
         var self = this
 
-        this.sequelize.transaction(function(t1) {
-          self.sequelize.transaction(function(t2) {
+        this.sequelize.transaction().then(function(t1) {
+          self.sequelize.transaction().then(function(t2) {
             self
               .Model
               .create({ name: 'omnom' }, { transaction: t1 })
