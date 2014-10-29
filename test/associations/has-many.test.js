@@ -1278,6 +1278,39 @@ describe(Support.getTestDialectTeaser("HasMany"), function() {
           expect(tasks[0].title).to.equal('get started');
         });
       });
+
+
+      it('should not pass indexes to the join table',function(){
+        var User = this.sequelize.define(
+          'User',
+          { username: DataTypes.STRING },
+          {
+            indexes: [
+              {
+                name: 'username_unique',
+                unique: true,
+                method: 'BTREE',
+                fields: ['username']
+              }
+            ]
+          });
+        var Task = this.sequelize.define(
+          'Task',
+          { title: DataTypes.STRING },
+          {
+            indexes: [
+              {
+                name: 'title_index',
+                method: 'BTREE',
+                fields: ['title']
+              }
+            ]
+          });
+        //create associations
+        User.hasMany(Task);
+        Task.hasMany(User);
+        return this.sequelize.sync({ force: true });
+      });
     });
 
     describe('addMultipleAssociations', function () {
@@ -1471,6 +1504,144 @@ describe(Support.getTestDialectTeaser("HasMany"), function() {
         expect(attributes.user_id).to.be.ok;
       });
     });
+
+    describe('foreign key with fields specified', function() {
+      beforeEach(function() {
+        this.User = this.sequelize.define('User', { name: DataTypes.STRING });
+        this.Project = this.sequelize.define('Project', { name: DataTypes.STRING });
+        this.Puppy = this.sequelize.define('Puppy', { breed: DataTypes.STRING });
+
+        // doubly linked has many
+        this.User.hasMany(this.Project, {
+          through: 'user_projects',
+          as: 'Projects',
+          foreignKey: {
+            field: 'user_id',
+            name: 'userId'
+          }
+        });
+        this.Project.hasMany(this.User, {
+          through: 'user_projects',
+          as: 'Users',
+          foreignKey: {
+            field: 'project_id',
+            name: 'projectId'
+          }
+        });
+
+        // singly linked has many
+        this.User.hasMany(this.Puppy, {
+          as: 'Puppies',
+          foreignKey: {
+            field: 'user_id',
+            name: 'userId'
+          }
+        });
+        this.Puppy.belongsTo(this.User, {
+          foreignKey: {
+            field: 'user_id',
+            name: 'userId'
+          }
+        });
+      });
+
+      it('should correctly get associations when doubly linked', function() {
+        var self = this;
+        return this.sequelize.sync({force: true}).then(function() {
+          return Promise.all([
+            self.User.create({name: 'Matt'}),
+            self.Project.create({name: 'Good Will Hunting'})
+          ]);
+        }).spread(function (user, project) {
+          return user.addProject(project).return(user);
+        }).then(function(user) {
+          return user.getProjects();
+        }).then(function(projects) {
+          var project = projects[0];
+
+          expect(project).to.be.defined;
+        });
+      });
+
+      it('should correctly get associations when singly linked', function() {
+        var self = this;
+        return this.sequelize.sync({force: true}).then(function() {
+          return Promise.all([
+            self.User.create({name: 'Matt'}),
+            self.Puppy.create({breed: 'Terrier'})
+          ]);
+        }).spread(function (user, puppy) {
+          return user.addPuppy(puppy).return(user);
+        }).then(function(user) {
+          return user.getPuppies().then(function(puppies) {
+            var puppy = puppies[0];
+
+            expect(puppy).to.be.defined;
+            expect(puppy.rawAttributes.userId).to.be.ok
+            expect(puppy.userId).to.equal(user.id)
+          });
+        });
+      });
+
+      it('should be able to handle nested includes properly', function() {
+        var self = this;
+        this.Group = this.sequelize.define('Group', { groupName: DataTypes.STRING});
+
+        this.Group.hasMany(this.User, {
+          through: 'group_users',
+          as: 'Users',
+          foreignKey: {
+            field: 'group_id',
+            name: 'groupId'
+          }
+        });
+        this.User.hasMany(this.Group, {
+          through: 'group_users',
+          as: 'Groups',
+          foreignKey: {
+            field: 'user_id',
+            name: 'userId'
+          }
+        });
+
+        return this.sequelize.sync({force: true}).then(function() {
+          return Promise.join(
+            self.Group.create({groupName: 'The Illuminati'}),
+            self.User.create({name: 'Matt'}),
+            self.Project.create({name: 'Good Will Hunting'})
+          );
+        }).spread(function (group, user, project) {
+          return user.addProject(project).then(function() {
+            return group.addUser(user).return(group);
+          });
+        }).then(function(group) {
+          // get the group and include both the users in the group and their project's
+          return self.Group.findAll({
+            where: {id: group.id},
+            include: [
+              {
+                model: self.User,
+                as: 'Users',
+                include: [
+                  { model: self.Project, as: 'Projects' }
+                ]
+              }
+            ]
+          });
+        }).then(function(groups) {
+          var group = groups[0];
+          expect(group).to.be.defined;
+
+          var user = group.Users[0];
+          expect(user).to.be.defined;
+
+          var project = user.Projects[0];
+          expect(project).to.be.defined;
+          expect(project.name).to.equal('Good Will Hunting');
+        });
+      });
+    });
+
 
     describe('primary key handling for join table', function () {
       beforeEach(function () {
@@ -1909,6 +2080,46 @@ describe(Support.getTestDialectTeaser("HasMany"), function() {
         expect(Group.associations.MyUsers.through.model.rawAttributes.GroupId).to.exist;
       });
     });
+
+    describe('multiple hasMany', function() {
+      beforeEach(function() {
+        this.User = this.sequelize.define('user', { name: Sequelize.STRING });
+        this.Project = this.sequelize.define('project', { projectName: Sequelize.STRING });
+      });
+
+      describe('project has owners and users and owners and users have projects', function() {
+        beforeEach(function() {
+          this.Project.hasMany(this.User, { as: 'owners', through: 'projectOwners'});
+          this.Project.hasMany(this.User, { as: 'users', through: 'projectUsers'});
+
+          this.User.hasMany(this.Project, { as: 'ownedProjects', through: 'projectOwners'});
+          this.User.hasMany(this.Project, { as: 'memberProjects', through: 'projectUsers'});
+
+          return this.sequelize.sync({ force: true });
+        });
+
+        it('correctly pairs associations', function () {
+          expect(this.Project.associations.owners.targetAssociation).to.equal(this.User.associations.ownedProjects);
+          expect(this.Project.associations.users.targetAssociation).to.equal(this.User.associations.memberProjects);
+        });
+
+        it('correctly sets user and owner', function() {
+          var self = this;
+
+          var p1 = this.Project.build({ projectName: 'p1' })
+            , u1 = this.User.build({ name: 'u1' })
+            , u2 = this.User.build({ name: 'u2' });
+
+          return p1
+            .save()
+            .then(function() { return u1.save(); })
+            .then(function() { return u2.save(); })
+            .then(function() { return p1.setUsers([u1]); })
+            .then(function() { return p1.setOwners([u2]); });
+        });
+      });
+    });
+
   });
 
   describe("Foreign key constraints", function() {
